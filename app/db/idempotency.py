@@ -1,10 +1,18 @@
+import logging
 import sqlite3
 import time
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 
 def _connect(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.parent.as_posix() not in ("/", "/tmp"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning("Using /tmp for idempotency (mkdir failed: %s)", e)
+        path = Path("/tmp/wandermate-idempotency.db")
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute(
         """

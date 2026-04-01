@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     idempotency_db_path: Path = Field(
         default_factory=lambda: Path(
             "/tmp/idempotency.db"
-            if os.getenv("VERCEL")
+            if (
+                os.getenv("VERCEL")
+                or os.getenv("VERCEL_ENV")
+                or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+            )
             else "./data/idempotency.db"
         ),
         validation_alias="IDEMPOTENCY_DB_PATH",
