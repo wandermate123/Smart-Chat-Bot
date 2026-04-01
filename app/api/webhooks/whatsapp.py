@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.core.security import verify_meta_signature
 from app.db.idempotency import IdempotencyStore
 from app.services.inbound_processor import process_whatsapp_payload
@@ -17,17 +17,24 @@ router = APIRouter(tags=["whatsapp"])
 
 @router.get("/webhooks/whatsapp")
 async def whatsapp_verify(
-    request: Request,
     hub_mode: Annotated[str | None, Query(alias="hub.mode")] = None,
     hub_verify_token: Annotated[str | None, Query(alias="hub.verify_token")] = None,
     hub_challenge: Annotated[str | None, Query(alias="hub.challenge")] = None,
 ) -> PlainTextResponse:
-    settings: Settings = request.app.state.settings
-    if hub_mode == "subscribe" and hub_verify_token == settings.meta_verify_token:
+    settings = get_settings()
+    expected = (settings.meta_verify_token or "").strip()
+    got = (hub_verify_token or "").strip()
+    if hub_mode == "subscribe" and expected and got == expected:
         if hub_challenge is None:
             raise HTTPException(status_code=400, detail="Missing hub.challenge")
-        return PlainTextResponse(content=hub_challenge)
-    logger.warning("Webhook verify failed: mode=%r", hub_mode)
+        # Meta expects raw challenge string as body, text/plain
+        return PlainTextResponse(content=str(hub_challenge))
+    logger.warning(
+        "Webhook verify failed: mode=%r token_match=%s expected_set=%s",
+        hub_mode,
+        got == expected,
+        bool(expected),
+    )
     raise HTTPException(status_code=403, detail="Verification failed")
 
 

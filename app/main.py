@@ -28,13 +28,23 @@ def _ensure_app_state(app: FastAPI) -> None:
 # Skip loading secrets / SQLite for simple probes (e.g. Vercel, uptime checks)
 _SKIP_STATE_PATHS = frozenset({"/health"})
 
+
+def _needs_full_app_state(request: Request) -> bool:
+    if request.url.path in _SKIP_STATE_PATHS:
+        return False
+    # Meta webhook *verification* is GET-only: needs token compare only, not SQLite.
+    if request.url.path == "/webhooks/whatsapp" and request.method == "GET":
+        return False
+    return True
+
+
 app = FastAPI(title="WanderMate")
 app.include_router(whatsapp_api.router)
 
 
 @app.middleware("http")
 async def wandermate_state_middleware(request: Request, call_next):
-    if request.url.path not in _SKIP_STATE_PATHS:
+    if _needs_full_app_state(request):
         _ensure_app_state(request.app)
     response = await call_next(request)
     return response
