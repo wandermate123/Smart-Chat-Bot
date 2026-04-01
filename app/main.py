@@ -26,7 +26,7 @@ def _ensure_app_state(app: FastAPI) -> None:
 
 
 # Skip loading secrets / SQLite for simple probes (e.g. Vercel, uptime checks)
-_SKIP_STATE_PATHS = frozenset({"/health"})
+_SKIP_STATE_PATHS = frozenset({"/", "/health"})
 
 
 def _needs_full_app_state(request: Request) -> bool:
@@ -40,6 +40,17 @@ def _needs_full_app_state(request: Request) -> bool:
 
 app = FastAPI(title="WanderMate")
 app.include_router(whatsapp_api.router)
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    """Homepage — API only; WhatsApp webhook is POST /webhooks/whatsapp."""
+    return {
+        "service": "WanderMate",
+        "health": "/health",
+        "health_ready": "/health/ready",
+        "whatsapp_webhook": "/webhooks/whatsapp",
+    }
 
 
 @app.middleware("http")
