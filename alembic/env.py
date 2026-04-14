@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from logging.config import fileConfig
 from pathlib import Path
 import sys
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -21,6 +20,7 @@ try:
 except ImportError:
     pass
 
+from app.db.engine import normalize_database_url, resolve_database_url_from_env
 from app.db.models import Base
 
 config = context.config
@@ -32,13 +32,14 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    url = os.environ.get("DATABASE_URL")
+    # Does not import app Settings (Meta vars not required to run migrations).
+    url = resolve_database_url_from_env()
     if not url:
         raise RuntimeError(
-            "DATABASE_URL is not set. Example: "
-            "postgresql+psycopg://user:pass@host/db?sslmode=require"
+            "No database URL: set DATABASE_URL, or DATABASE_HOST and DATABASE_PASSWORD "
+            "(recommended if your password contains @ # ] and breaks a single URI)."
         )
-    return url
+    return normalize_database_url(url)
 
 
 def run_migrations_offline() -> None:
@@ -55,13 +56,9 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    section = config.get_section(config.config_ini_section) or {}
-    section["sqlalchemy.url"] = get_url()
-    connectable = engine_from_config(
-        section,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Use create_engine(get_url()) so postgresql+psycopg:// (psycopg v3) is honored.
+    # A plain postgresql:// URL would pull in psycopg2, which this project does not use.
+    connectable = create_engine(get_url(), poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
         context.configure(

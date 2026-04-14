@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.engine import get_engine
 from app.db.models import Conversation, Message, User
+from app.services.funnel_logic import qualification_satisfied
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,11 @@ def record_inbound(
     msg_type: str | None,
     text: str,
     raw_msg: dict[str, Any],
+    button_id: str | None = None,
 ) -> tuple[int, str]:
-    """Persist inbound message; advance greeting → qualification on first real text.
+    """Persist inbound message; advance greeting → qualification on first real input.
+
+    ``text`` is message body or button title. ``button_id`` set for interactive replies.
 
     Returns (conversation_id, stage_before) for reply routing.
     """
@@ -70,12 +74,18 @@ def record_inbound(
             )
             conv.last_message_at = datetime.now(timezone.utc)
 
-            if (
-                stage_before == "greeting"
-                and msg_type == "text"
-                and (text or "").strip()
-            ):
+            has_substance = (
+                (msg_type == "text" and (text or "").strip())
+                or (msg_type == "interactive" and bool(button_id))
+            )
+            if stage_before == "greeting" and has_substance:
                 conv.stage = "qualification"
+            elif (
+                stage_before == "qualification"
+                and has_substance
+                and qualification_satisfied(text, button_id)
+            ):
+                conv.stage = "proposal"
 
             conv_id = conv.id
 

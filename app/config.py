@@ -2,8 +2,10 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.db.engine import build_database_url
 
 
 class Settings(BaseSettings):
@@ -52,8 +54,25 @@ class Settings(BaseSettings):
     )
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
+    # When false, Postgres is disabled: funnel stage + idempotency use local SQLite only.
+    database_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("DATABASE_ENABLED", "USE_POSTGRES"),
+    )
+
     # PostgreSQL (Neon / Supabase / Railway). Optional: bot runs without DB until set.
     database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
+    # If DATABASE_URL breaks (password has @ # etc.), use these instead — no URL-encoding needed.
+    database_host: str | None = Field(default=None, validation_alias="DATABASE_HOST")
+    database_user: str = Field(default="postgres", validation_alias="DATABASE_USER")
+    database_password: str | None = Field(
+        default=None, validation_alias="DATABASE_PASSWORD"
+    )
+    database_name: str = Field(default="postgres", validation_alias="DATABASE_NAME")
+    database_port: int = Field(default=5432, validation_alias="DATABASE_PORT")
+    database_sslmode: str | None = Field(
+        default="require", validation_alias="DATABASE_SSLMODE"
+    )
 
     # If false, schema must exist (run: alembic upgrade head). Recommended for production.
     database_auto_create_tables: bool = Field(
@@ -66,6 +85,28 @@ class Settings(BaseSettings):
         default="+918400437772",
         validation_alias="MAIN_WHATSAPP_E164",
     )
+
+    @model_validator(mode="after")
+    def assemble_database_url(self) -> "Settings":
+        if not self.database_enabled:
+            object.__setattr__(self, "database_url", None)
+            return self
+        if self.database_url and str(self.database_url).strip():
+            return self
+        if self.database_host and self.database_password is not None:
+            object.__setattr__(
+                self,
+                "database_url",
+                build_database_url(
+                    host=self.database_host.strip(),
+                    user=self.database_user,
+                    password=self.database_password,
+                    database=self.database_name,
+                    port=self.database_port,
+                    sslmode=self.database_sslmode,
+                ),
+            )
+        return self
 
 
 @lru_cache
