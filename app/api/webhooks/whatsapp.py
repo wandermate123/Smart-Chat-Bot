@@ -44,7 +44,13 @@ async def whatsapp_inbound(request: Request) -> dict[str, bool]:
     settings: Settings = request.app.state.settings
     sig = request.headers.get("X-Hub-Signature-256")
     if not verify_meta_signature(raw, sig, settings.meta_app_secret):
-        logger.warning("Invalid webhook signature")
+        logger.warning(
+            "Invalid WhatsApp webhook signature — replies will not run. "
+            "In Meta: App → Settings → Basic → App secret must match env META_APP_SECRET on Vercel. "
+            "secret_configured=%s header_present=%s",
+            bool((settings.meta_app_secret or "").strip()),
+            bool(sig),
+        )
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     try:

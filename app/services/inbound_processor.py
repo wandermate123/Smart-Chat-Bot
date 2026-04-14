@@ -119,20 +119,40 @@ def _extract_inbound_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _interactive_fallback_text(payload: OutboundPayload) -> str:
+    lines = [payload.body.strip(), ""]
+    for _bid, title in payload.buttons or []:
+        lines.append(f"• {title}")
+    lines.append(
+        "\n(Option chuno jo best lage — type bhi kar sakte ho, jaise: 2N/3N ya 20k 2 log.)"
+    )
+    body = "\n".join(lines).strip()
+    return body[:4096]
+
+
 async def process_whatsapp_payload(
     payload: dict[str, Any],
     settings: Settings,
     idempotency: IdempotencyStore,
 ) -> None:
-    for item in _extract_inbound_messages(payload):
+    items = _extract_inbound_messages(payload)
+    if not items:
+        n_entry = len(payload.get("entry") or [])
+        logger.info(
+            "WhatsApp webhook: no user messages to process (often delivery status-only). "
+            "object=%r entries=%s. Subscribe to messages + check user writes to this Cloud API number.",
+            payload.get("object"),
+            n_entry,
+        )
+
+    for item in items:
         msg = item["message"]
         wam_id = msg.get("id")
         if not wam_id:
             continue
         if idempotency.seen(wam_id):
-            logger.debug("Duplicate wam_id %s skipped", wam_id)
+            logger.info("Duplicate wam_id %s skipped (idempotency)", wam_id)
             continue
-        idempotency.mark(wam_id)
 
         wa_id = msg.get("from")
         msg_type, user_text, button_id = _parse_inbound_message(msg)
@@ -147,6 +167,7 @@ async def process_whatsapp_payload(
         )
 
         if not wa_id:
+            logger.warning("Inbound message missing from wa_id wam_id=%s", wam_id)
             continue
 
         conv_id: int | None = None
@@ -205,6 +226,26 @@ async def process_whatsapp_payload(
                 outbound.body,
                 outbound.buttons or [],
             )
+            if send_result is None:
+                logger.warning(
+                    "Interactive message failed for wa_id=%s — sending plain text fallback "
+                    "(see Graph API error above; WABA tier / number / payload).",
+                    wa_id,
+                )
+                send_result = await send_text_message(
+                    settings, wa_id, _interactive_fallback_text(outbound)
+                )
+
+        if send_result is None:
+            logger.error(
+                "Outbound send failed for wa_id=%s outbound=%s — check "
+                "META_WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, OUTBOUND_REPLY_ENABLED",
+                wa_id,
+                outbound.kind,
+            )
+            continue
+
+        idempotency.mark(wam_id)
 
         log_body = _outbound_log_body(outbound)
         out_wam_id = None
