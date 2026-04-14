@@ -31,10 +31,13 @@ def _ensure_app_state(app: FastAPI) -> None:
     ):
         app.state._db_init_attempted = True
         try:
-            init_engine_and_tables(settings.database_url)
+            if settings.database_auto_create_tables:
+                init_engine_and_tables(settings.database_url)
+            else:
+                ping_database(settings.database_url)
             app.state._db_schema_ok = True
         except Exception:
-            logger.exception("Postgres init_engine_and_tables failed")
+            logger.exception("Postgres init / ping failed")
     setattr(app.state, _STATE_FLAG, True)
 
 

@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # PostgreSQL (Neon / Supabase / Railway). Optional: bot runs without DB until set.
     database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
 
+    # If false, schema must exist (run: alembic upgrade head). Recommended for production.
+    database_auto_create_tables: bool = Field(
+        default=True,
+        validation_alias="DATABASE_AUTO_CREATE_TABLES",
+    )
+
     # Public WhatsApp line for branding / logs (change when you switch numbers in Meta).
     main_whatsapp_e164: str = Field(
         default="+918400437772",
