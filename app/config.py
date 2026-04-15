@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.db.engine import build_database_url
@@ -85,6 +85,19 @@ class Settings(BaseSettings):
         default="+918400437772",
         validation_alias="MAIN_WHATSAPP_E164",
     )
+
+    @field_validator(
+        "meta_verify_token",
+        "meta_app_secret",
+        "meta_whatsapp_access_token",
+        "whatsapp_phone_number_id",
+        mode="before",
+    )
+    @classmethod
+    def _strip_whitespace(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
     @model_validator(mode="after")
     def assemble_database_url(self) -> "Settings":

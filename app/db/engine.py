@@ -1,9 +1,16 @@
+import logging
 import os
+import threading
 from functools import lru_cache
 from urllib.parse import quote
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
+
+logger = logging.getLogger(__name__)
+
+_schema_init_lock = threading.Lock()
+_schema_initialized_urls: set[str] = set()
 
 
 def normalize_database_url(url: str) -> str:
@@ -79,7 +86,34 @@ def get_engine(database_url: str):
     kw: dict = {"pool_pre_ping": True}
     if os.getenv("VERCEL") or os.getenv("VERCEL_ENV"):
         kw["poolclass"] = NullPool
+    if url.startswith("postgresql"):
+        timeout = int(os.getenv("DATABASE_CONNECT_TIMEOUT", "8"))
+        kw["connect_args"] = {"connect_timeout": timeout}
     return create_engine(url, **kw)
+
+
+def lazy_init_database_schema(database_url: str) -> None:
+    """Run create_all or ping once per URL before first ORM write.
+
+    Not invoked from WhatsApp webhook middleware so a slow/unreachable DB never blocks replies.
+    """
+    if database_url in _schema_initialized_urls:
+        return
+    with _schema_init_lock:
+        if database_url in _schema_initialized_urls:
+            return
+        from app.config import get_settings
+
+        s = get_settings()
+        try:
+            if s.database_auto_create_tables:
+                init_engine_and_tables(database_url)
+            else:
+                ping_database(database_url)
+        except Exception:
+            logger.exception("Database schema init/ping failed")
+            raise
+        _schema_initialized_urls.add(database_url)
 
 
 def init_engine_and_tables(database_url: str) -> None:

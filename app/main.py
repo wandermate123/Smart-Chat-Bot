@@ -5,16 +5,20 @@ from fastapi import FastAPI, Request
 
 from app.api.webhooks import whatsapp as whatsapp_api
 from app.config import get_settings
-from app.db.engine import init_engine_and_tables, ping_database
 from app.db.idempotency import IdempotencyStore
+from app.db.engine import ping_database
 
 logger = logging.getLogger(__name__)
 
-_STATE_FLAG = "_wandermate_state_ok"
+_MINIMAL_STATE_FLAG = "_wandermate_minimal_ok"
+
+# Paths that skip app.state entirely (fast probes).
+_SKIP_STATE_PATHS = frozenset({"/", "/health"})
 
 
-def _ensure_app_state(app: FastAPI) -> None:
-    if getattr(app.state, _STATE_FLAG, False):
+def _ensure_minimal_app_state(app: FastAPI) -> None:
+    """Settings + idempotency only. Never touches Postgres (webhooks must stay fast)."""
+    if getattr(app.state, _MINIMAL_STATE_FLAG, False):
         return
     settings = get_settings()
     if not logging.root.handlers:
@@ -24,34 +28,7 @@ def _ensure_app_state(app: FastAPI) -> None:
         )
     app.state.settings = settings
     app.state.idempotency = IdempotencyStore(settings.idempotency_db_path)
-    if (
-        settings.database_url
-        and not getattr(app.state, "_db_schema_ok", False)
-        and not getattr(app.state, "_db_init_attempted", False)
-    ):
-        app.state._db_init_attempted = True
-        try:
-            if settings.database_auto_create_tables:
-                init_engine_and_tables(settings.database_url)
-            else:
-                ping_database(settings.database_url)
-            app.state._db_schema_ok = True
-        except Exception:
-            logger.exception("Postgres init / ping failed")
-    setattr(app.state, _STATE_FLAG, True)
-
-
-# Skip loading secrets / SQLite for simple probes (e.g. Vercel, uptime checks)
-_SKIP_STATE_PATHS = frozenset({"/", "/health"})
-
-
-def _needs_full_app_state(request: Request) -> bool:
-    if request.url.path in _SKIP_STATE_PATHS:
-        return False
-    # Meta webhook *verification* is GET-only: needs token compare only, not SQLite.
-    if request.url.path == "/webhooks/whatsapp" and request.method == "GET":
-        return False
-    return True
+    setattr(app.state, _MINIMAL_STATE_FLAG, True)
 
 
 app = FastAPI(title="WanderMate")
@@ -73,10 +50,15 @@ async def root() -> dict[str, str]:
 
 @app.middleware("http")
 async def wandermate_state_middleware(request: Request, call_next):
-    if _needs_full_app_state(request):
-        _ensure_app_state(request.app)
-    response = await call_next(request)
-    return response
+    path = request.url.path
+    method = request.method
+    if path in _SKIP_STATE_PATHS:
+        return await call_next(request)
+    # Meta verify uses get_settings() only; no SQLite / env-heavy init needed.
+    if path == "/webhooks/whatsapp" and method == "GET":
+        return await call_next(request)
+    _ensure_minimal_app_state(request.app)
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -86,7 +68,7 @@ async def health() -> dict[str, str]:
 
 @app.get("/health/ready")
 async def health_ready() -> dict[str, str]:
-    """Loads settings + SQLite idempotency; pings Postgres if DATABASE_URL is set."""
+    """Loads settings; pings Postgres if DATABASE_URL is set."""
     settings = get_settings()
     if settings.database_url:
         await asyncio.to_thread(ping_database, settings.database_url)

@@ -41,6 +41,11 @@ async def whatsapp_verify(
 @router.post("/webhooks/whatsapp")
 async def whatsapp_inbound(request: Request) -> dict[str, bool]:
     raw = await request.body()
+    logger.info(
+        "WhatsApp webhook POST received bytes=%s content_type=%r",
+        len(raw),
+        request.headers.get("content-type"),
+    )
     settings: Settings = request.app.state.settings
     sig = request.headers.get("X-Hub-Signature-256")
     if not verify_meta_signature(raw, sig, settings.meta_app_secret):

@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.engine import get_engine
+from app.db.engine import get_engine, lazy_init_database_schema
 from app.db.models import Conversation, Message, User
 from app.services.funnel_logic import qualification_satisfied
 
@@ -35,6 +35,7 @@ def record_inbound(
 
     Returns (conversation_id, stage_before) for reply routing.
     """
+    lazy_init_database_schema(database_url)
     sf = _session_factory(database_url)
     conv_id: int
     stage_before: str
@@ -104,6 +105,7 @@ def record_outbound(
     body_text: str,
     wam_id: str | None = None,
 ) -> None:
+    lazy_init_database_schema(database_url)
     sf = _session_factory(database_url)
     with sf() as session:
         with session.begin():
