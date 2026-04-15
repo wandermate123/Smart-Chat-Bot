@@ -109,6 +109,30 @@ def _outbound_for_stage(
     )
 
 
+def _log_webhook_routing(payload: dict[str, Any], settings: Settings) -> None:
+    """Surface common Meta/Vercel misconfigurations in logs."""
+    for entry in payload.get("entry") or []:
+        for ch in entry.get("changes") or []:
+            field = ch.get("field")
+            if field and field != "messages":
+                logger.warning(
+                    "Webhook change field=%r — inbound chat needs field=messages subscribed in Meta",
+                    field,
+                )
+            meta = (ch.get("value") or {}).get("metadata") or {}
+            wid = meta.get("phone_number_id")
+            if wid is not None and str(wid).strip() != str(
+                settings.whatsapp_phone_number_id
+            ).strip():
+                logger.error(
+                    "WHATSAPP_PHONE_NUMBER_ID mismatch: event metadata phone_number_id=%s "
+                    "!= env WHATSAPP_PHONE_NUMBER_ID=%s. Use the ID for this exact Cloud API number.",
+                    wid,
+                    settings.whatsapp_phone_number_id,
+                )
+            return
+
+
 def _extract_inbound_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for entry in payload.get("entry") or []:
@@ -135,6 +159,7 @@ async def process_whatsapp_payload(
     settings: Settings,
     idempotency: IdempotencyStore,
 ) -> None:
+    _log_webhook_routing(payload, settings)
     items = _extract_inbound_messages(payload)
     if not items:
         n_entry = len(payload.get("entry") or [])

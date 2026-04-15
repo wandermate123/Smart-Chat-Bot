@@ -99,6 +99,13 @@ class Settings(BaseSettings):
             return v.strip()
         return v
 
+    @field_validator("meta_whatsapp_access_token", mode="before")
+    @classmethod
+    def _strip_bearer_prefix(cls, v: object) -> object:
+        if isinstance(v, str) and v[:7].lower() == "bearer ":
+            return v[7:].strip()
+        return v
+
     @model_validator(mode="after")
     def assemble_database_url(self) -> "Settings":
         if not self.database_enabled:
